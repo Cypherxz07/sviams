@@ -1,13 +1,15 @@
 import sys
 from pathlib import Path
 from functools import wraps
+import os
+from markupsafe import escape as esc
 from flask import Flask, request, redirect, render_template_string, Response
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import db
 
 ADMIN_USER = "admin"
-ADMIN_PASS = "sviams123"   # change this
+ADMIN_PASS = os.environ["SVIAMS_ADMIN_PASS"]
 
 app = Flask(__name__)
 db.init_db()
@@ -38,10 +40,9 @@ th{background:#eee} nav a{margin-right:14px}
 @auth
 def tags():
     rows = "".join(
-        f"<tr><td>{t['uid']}</td><td>{t['label'] or ''}</td><td>{t['status']}</td>"
-        f"<td><form method=post action=/tags/{t['uid']}/status style='display:inline'>"
-        f"<select name=status>"
-        f"<option>available</option><option>lost</option></select>"
+        f"<tr><td>{esc(t['uid'])}</td><td>{esc(t['label'] or '')}</td><td>{esc(t['status'])}</td>"
+        f"<td><form method=post action='/tags/{esc(t['uid'])}/status' style='display:inline'>"
+        f"<select name=status><option>available</option><option>lost</option></select>"
         f"<button>Set</button></form></td></tr>"
         for t in db.list_tags())
     body = f"""
@@ -63,25 +64,41 @@ def add_tag():
 @app.post("/tags/<uid>/status")
 @auth
 def tag_status(uid):
+    if request.form["status"] not in ("available", "lost"):
+        return redirect("/")
     db.set_tag_status(uid, request.form["status"])
     return redirect("/")
 
 @app.route("/visits")
 @auth
 def visits():
-    rows = "".join(
-        f"<tr><td>{v['plate']}</td><td>{v['tag_uid']}</td><td>{v['entry_time']}</td>"
-        f"<td>{v['exit_time'] or 'INSIDE'}</td>"
-        f"<td>{'edited' if v['edited_by_guard'] else ''}</td></tr>"
-        for v in db.list_visits())
-    body = f"<h2>Visits</h2><table><tr><th>Plate</th><th>Tag</th><th>Entry</th><th>Exit</th><th>Note</th></tr>{rows}</table>"
+    q = request.args.get("q", "").strip().upper()
+    day = request.args.get("date", "")
+    only = request.args.get("override")
+    rows = ""
+    for v in db.list_visits(1000):
+        if q and q not in v["plate"] and q not in v["tag_uid"]:
+            continue
+        if day and not v["entry_time"].startswith(day):
+            continue
+        if only and not v["override"]:
+            continue
+        flags = ("OVERRIDE " if v["override"] else "") + ("edited" if v["edited_by_guard"] else "")
+        rows += (f"<tr><td>{esc(v['plate'])}</td><td>{esc(v['tag_uid'])}</td>"
+                 f"<td>{v['entry_time']}</td><td>{v['exit_time'] or 'INSIDE'}</td>"
+                 f"<td>{flags}</td></tr>")
+    body = f"""<h2>Visits</h2>
+    <form>Plate/Tag <input name=q value="{esc(q)}"> Date <input type=date name=date value="{esc(day)}">
+    <label><input type=checkbox name=override {'checked' if only else ''}> overrides only</label>
+    <button>Search</button></form><br>
+    <table><tr><th>Plate</th><th>Tag</th><th>Entry</th><th>Exit</th><th>Flags</th></tr>{rows}</table>"""
     return render_template_string(PAGE, body=body)
 
 @app.route("/events")
 @auth
 def events():
     rows = "".join(
-        f"<tr><td>{e['time']}</td><td>{e['type']}</td><td>{e['plate'] or ''}</td><td>{e['tag_uid'] or ''}</td></tr>"
+        f"<tr><td>{e['time']}</td><td>{esc(e['type'])}</td><td>{esc(e['plate'] or '')}</td><td>{esc(e['tag_uid'] or '')}</td></tr>"
         for e in db.list_events())
     body = f"<h2>Events</h2><table><tr><th>Time</th><th>Type</th><th>Plate</th><th>Tag</th></tr>{rows}</table>"
     return render_template_string(PAGE, body=body)

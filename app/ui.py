@@ -1,8 +1,8 @@
 import subprocess
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (QStackedWidget, QWidget, QVBoxLayout, QPushButton,
                              QLabel, QLineEdit, QMessageBox, QSizePolicy)
-import db, recognizer, config
+import db, recognizer, config, rfid
 
 STYLE = """
 QPushButton{font-size:34px;padding:12px;border-radius:14px;background:#2d6cdf;color:white}
@@ -24,7 +24,7 @@ def button(text, colour, size=34):
     return b
 
 class MainWindow(QStackedWidget):
-    HOME, CAMERA, CONFIRM, TAG, RESULT = range(5)
+    HOME, CAMERA, CONFIRM, TAG, RESULT, REGISTER = range(6)
 
     def __init__(self, cam):
         super().__init__()
@@ -35,7 +35,7 @@ class MainWindow(QStackedWidget):
         self.conf = 0.0
         self.edited = False
         self.visit_id = None
-        for build in (self._home, self._camera, self._confirm, self._tag, self._result):
+        for build in (self._home, self._camera, self._confirm, self._tag, self._result, self._register):
             self.addWidget(build())
 
     def _page(self):
@@ -52,11 +52,14 @@ class MainWindow(QStackedWidget):
         entry.clicked.connect(lambda: self.start_mode("entry"))
         exit_ = button("EXIT", "#8e44ad", 44)
         exit_.clicked.connect(lambda: self.start_mode("exit"))
+        reg = button("Register tag", "#555", 28)
+        reg.clicked.connect(self.go_register)
         pwr = button("Power", "#777", 28)
         pwr.clicked.connect(self.power_menu)
         lay.addWidget(label("SVIAMS", 40), 1)
         lay.addWidget(entry, 4)
         lay.addWidget(exit_, 4)
+        lay.addWidget(reg, 1)
         lay.addWidget(pwr, 1)
         return w
 
@@ -107,6 +110,8 @@ class MainWindow(QStackedWidget):
         lay.addWidget(self.uid_edit, 1)
         lay.addWidget(go, 2)
         lay.addWidget(cancel, 1)
+        self.tag_timer = QTimer(self)
+        self.tag_timer.timeout.connect(self.poll_tag)
         return w
 
     def _result(self):
@@ -122,12 +127,25 @@ class MainWindow(QStackedWidget):
         lay.addWidget(done, 2)
         return w
 
+    def _register(self):
+        w, lay = self._page()
+        self.reg_lbl = label("Tap a new tag on the reader", 36)
+        back = button("Back", "#777", 28)
+        back.clicked.connect(self.stop_register)
+        lay.addWidget(self.reg_lbl, 6)
+        lay.addWidget(back, 1)
+        self.reg_timer = QTimer(self)
+        self.reg_timer.timeout.connect(self.poll_register)
+        self.reg_last = None
+        return w
+
     # ---------- navigation ----------
     def start_mode(self, mode):
         self.mode = mode
         self.go_camera()
 
     def go_camera(self):
+        self.tag_timer.stop()
         colour = "#2d6cdf" if self.mode == "entry" else "#8e44ad"
         self.mode_lbl.setText(self.mode.upper())
         self.mode_lbl.setStyleSheet(f"font-size:32px;color:{colour};font-weight:bold")
@@ -135,6 +153,8 @@ class MainWindow(QStackedWidget):
         self.cam.resume()
 
     def go_home(self):
+        self.tag_timer.stop()
+        self.reg_timer.stop()
         self.cam.pause()
         self.setCurrentIndex(self.HOME)
 
@@ -161,11 +181,21 @@ class MainWindow(QStackedWidget):
         self.plate = typed
         self.uid_edit.clear()
         self.setCurrentIndex(self.TAG)
+        self.tag_timer.start(200)
 
-    def process_tag(self):
+    def poll_tag(self):
+        uid = rfid.read_uid()
+        if uid:
+            self.tag_timer.stop()
+            self.handle_tag(uid)
+
+    def process_tag(self):  # typed-UID fallback button
         uid = self.uid_edit.text().strip().upper()
-        if not uid:
-            return
+        if uid:
+            self.tag_timer.stop()
+            self.handle_tag(uid)
+
+    def handle_tag(self, uid):
         self.visit_id = None
         if self.mode == "entry":
             ok, msg = db.record_entry(self.plate, uid, self.raw, self.conf, self.edited)
@@ -193,6 +223,27 @@ class MainWindow(QStackedWidget):
     def override(self):
         db.complete_exit(self.visit_id, override=True)
         self.show_result(True, "Override logged.\nExit recorded.")
+
+    def go_register(self):
+        self.cam.pause()
+        self.reg_last = None
+        self.reg_lbl.setText("Tap a new tag on the reader")
+        self.setCurrentIndex(self.REGISTER)
+        self.reg_timer.start(200)
+
+    def stop_register(self):
+        self.reg_timer.stop()
+        self.go_home()
+
+    def poll_register(self):
+        uid = rfid.read_uid()
+        if uid and uid != self.reg_last:
+            if db.get_tag(uid):
+                self.reg_lbl.setText(f"{uid}\nAlready registered")
+            else:
+                db.add_tag(uid, f"Tag {len(db.list_tags()) + 1}")
+                self.reg_lbl.setText(f"{uid}\nRegistered. Tap another or go Back.")
+        self.reg_last = uid
 
     def power_menu(self):
         box = QMessageBox(self)

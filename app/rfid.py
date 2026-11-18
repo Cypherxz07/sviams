@@ -1,6 +1,6 @@
 from mfrc522 import MFRC522
 
-_reader = MFRC522()
+_reader = MFRC522(bus=1, device=0, pin_mode=10, pin_rst=29)
 
 def read_uid():
     """Returns the tag UID as hex text (e.g. 'A1B2C3D4'), or None if no tag is present."""

@@ -12,6 +12,7 @@ def conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(DB_PATH)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA journal_mode=WAL")
     return c
 
 def init_db():
@@ -40,6 +41,9 @@ def init_db():
             tag_uid TEXT
         );
         """)
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(visits)")]
+        if "override" not in cols:
+            c.execute("ALTER TABLE visits ADD COLUMN override INTEGER DEFAULT 0")
 
 def log_event(c, type_, plate=None, tag_uid=None):
     c.execute("INSERT INTO events(time,type,plate,tag_uid) VALUES(?,?,?,?)",
@@ -105,7 +109,7 @@ def check_exit(plate, uid):
 def complete_exit(visit_id, override=False):
     with conn() as c:
         v = c.execute("SELECT * FROM visits WHERE id=?", (visit_id,)).fetchone()
-        c.execute("UPDATE visits SET exit_time=? WHERE id=?", (now(), visit_id))
+        c.execute("UPDATE visits SET exit_time=?, override=? WHERE id=?", (now(), int(override), visit_id))
         c.execute("UPDATE tags SET status='available' WHERE uid=?", (v["tag_uid"],))
         log_event(c, "exit_override" if override else "exit_ok", v["plate"], v["tag_uid"])
 
