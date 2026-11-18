@@ -18,8 +18,7 @@ class Camera:
         self.timer.timeout.connect(self._update)
 
     def start(self):
-        self.picam2.start()
-        self.timer.start(80)          # about 12 fps
+        self.picam2.start()        # about 12 fps
 
     def _update(self):
         arr = self.picam2.capture_array("main")

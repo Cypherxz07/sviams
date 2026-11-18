@@ -1,25 +1,30 @@
 import subprocess
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (QStackedWidget, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QLabel, QLineEdit, QMessageBox)
+from PyQt5.QtWidgets import (QStackedWidget, QWidget, QVBoxLayout, QPushButton,
+                             QLabel, QLineEdit, QMessageBox, QSizePolicy)
 import db, recognizer, config
 
 STYLE = """
-QPushButton{font-size:18px;padding:8px;border-radius:8px;background:#2d6cdf;color:white}
-QLabel{font-size:20px}
-QLineEdit{font-size:26px;padding:6px}
+QPushButton{font-size:34px;padding:12px;border-radius:14px;background:#2d6cdf;color:white}
+QLabel{font-size:30px}
+QLineEdit{font-size:40px;padding:8px}
 """
 
-def label(text, size=20, center=True):
+def label(text, size=30):
     l = QLabel(text)
     l.setStyleSheet(f"font-size:{size}px")
-    if center:
-        l.setAlignment(Qt.AlignCenter)
+    l.setAlignment(Qt.AlignCenter)
     l.setWordWrap(True)
     return l
 
+def button(text, colour, size=34):
+    b = QPushButton(text)
+    b.setStyleSheet(f"background:{colour};font-size:{size}px")
+    b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    return b
+
 class MainWindow(QStackedWidget):
-    HOME, CONFIRM, TAG, RESULT = range(4)
+    HOME, CAMERA, CONFIRM, TAG, RESULT = range(5)
 
     def __init__(self, cam):
         super().__init__()
@@ -30,50 +35,63 @@ class MainWindow(QStackedWidget):
         self.conf = 0.0
         self.edited = False
         self.visit_id = None
-        for build in (self._home, self._confirm, self._tag, self._result):
+        for build in (self._home, self._camera, self._confirm, self._tag, self._result):
             self.addWidget(build())
 
-    # ---------- page builders ----------
     def _page(self):
         w = QWidget()
         lay = QVBoxLayout(w)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(10)
         return w, lay
 
+    # ---------- pages ----------
     def _home(self):
         w, lay = self._page()
-        lay.setContentsMargins(4, 4, 4, 4)
-        self.cam.widget.setMinimumSize(312, 300)
-        lay.addWidget(self.cam.widget, 1)
-        self.mode_btn = QPushButton()
-        self.mode_btn.clicked.connect(self.toggle_mode)
-        self.refresh_mode()
-        cap = QPushButton("CAPTURE")
-        cap.setStyleSheet("background:#1a9e4b;font-size:26px;padding:22px")
-        cap.clicked.connect(self.capture)
-        pwr = QPushButton("Power")
-        pwr.setStyleSheet("background:#777")
+        entry = button("ENTRY", "#2d6cdf", 44)
+        entry.clicked.connect(lambda: self.start_mode("entry"))
+        exit_ = button("EXIT", "#8e44ad", 44)
+        exit_.clicked.connect(lambda: self.start_mode("exit"))
+        pwr = button("Power", "#777", 28)
         pwr.clicked.connect(self.power_menu)
-        lay.addWidget(self.mode_btn)
-        lay.addWidget(cap, 1)
-        lay.addWidget(pwr)
+        lay.addWidget(label("SVIAMS", 40), 1)
+        lay.addWidget(entry, 4)
+        lay.addWidget(exit_, 4)
+        lay.addWidget(pwr, 1)
+        return w
+
+    def _camera(self):
+        w, lay = self._page()
+        self.mode_lbl = label("", 32)
+        self.cam.widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        cap = button("CAPTURE", "#1a9e4b", 44)
+        cap.clicked.connect(self.capture)
+        back = button("Back", "#777", 28)
+        back.clicked.connect(self.go_home)
+        lay.addWidget(self.mode_lbl, 1)
+        lay.addWidget(self.cam.widget, 8)
+        lay.addWidget(cap, 3)
+        lay.addWidget(back, 1)
         return w
 
     def _confirm(self):
         w, lay = self._page()
         self.photo = QLabel()
         self.photo.setAlignment(Qt.AlignCenter)
-        self.photo.setFixedHeight(200)
         self.photo.setStyleSheet("background:black")
-        self.conf_info = label("", 16)
+        self.photo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.conf_info = label("", 26)
         self.plate_edit = QLineEdit()
         self.plate_edit.setAlignment(Qt.AlignCenter)
-        ok = QPushButton("Confirm")
+        ok = button("Confirm", "#1a9e4b")
         ok.clicked.connect(self.confirm_plate)
-        back = QPushButton("Retake")
-        back.setStyleSheet("background:#777")
-        back.clicked.connect(self.go_home)
-        for x in (self.photo, self.plate_edit, self.conf_info, ok, back):
-            lay.addWidget(x)
+        retake = button("Retake", "#777", 28)
+        retake.clicked.connect(self.go_camera)
+        lay.addWidget(self.photo, 6)
+        lay.addWidget(self.plate_edit, 1)
+        lay.addWidget(self.conf_info, 1)
+        lay.addWidget(ok, 2)
+        lay.addWidget(retake, 1)
         return w
 
     def _tag(self):
@@ -81,49 +99,51 @@ class MainWindow(QStackedWidget):
         self.uid_edit = QLineEdit()
         self.uid_edit.setPlaceholderText("DEV: type tag UID")
         self.uid_edit.setAlignment(Qt.AlignCenter)
-        go = QPushButton("Tag tapped")
+        go = button("Tag tapped", "#2d6cdf")
         go.clicked.connect(self.process_tag)
-        cancel = QPushButton("Cancel")
-        cancel.setStyleSheet("background:#777")
+        cancel = button("Cancel", "#777", 28)
         cancel.clicked.connect(self.go_home)
-        for x in (label("Tap the tag on the reader", 24), self.uid_edit, go, cancel):
-            lay.addWidget(x)
+        lay.addWidget(label("Tap the tag on the reader", 36), 4)
+        lay.addWidget(self.uid_edit, 1)
+        lay.addWidget(go, 2)
+        lay.addWidget(cancel, 1)
         return w
 
     def _result(self):
         w, lay = self._page()
         self.result_page = w
-        self.result_lbl = label("", 30)
-        self.override_btn = QPushButton("Override (log it)")
-        self.override_btn.setStyleSheet("background:#c77700")
+        self.result_lbl = label("", 40)
+        self.override_btn = button("Override (log it)", "#c77700", 30)
         self.override_btn.clicked.connect(self.override)
-        done = QPushButton("Done")
-        done.clicked.connect(self.go_home)
-        for x in (self.result_lbl, self.override_btn, done):
-            lay.addWidget(x)
+        done = button("Done", "#2d6cdf")
+        done.clicked.connect(self.go_camera)
+        lay.addWidget(self.result_lbl, 5)
+        lay.addWidget(self.override_btn, 2)
+        lay.addWidget(done, 2)
         return w
 
+    # ---------- navigation ----------
+    def start_mode(self, mode):
+        self.mode = mode
+        self.go_camera()
+
+    def go_camera(self):
+        colour = "#2d6cdf" if self.mode == "entry" else "#8e44ad"
+        self.mode_lbl.setText(self.mode.upper())
+        self.mode_lbl.setStyleSheet(f"font-size:32px;color:{colour};font-weight:bold")
+        self.setCurrentIndex(self.CAMERA)
+        self.cam.resume()
+
+    def go_home(self):
+        self.cam.pause()
+        self.setCurrentIndex(self.HOME)
+
     # ---------- actions ----------
-    def refresh_mode(self):
-        if self.mode == "entry":
-            self.mode_btn.setText("ENTRY")
-            self.mode_btn.setStyleSheet("background:#2d6cdf")
-        else:
-            self.mode_btn.setText("EXIT")
-            self.mode_btn.setStyleSheet("background:#8e44ad")
-
-    def toggle_mode(self):
-        self.mode = "exit" if self.mode == "entry" else "entry"
-        self.refresh_mode()
-
     def capture(self):
         self.cam.capture(self.on_captured)
 
-    def go_home(self):
-        self.cam.resume()
-        self.setCurrentIndex(self.HOME)
-
     def on_captured(self, image):
+        self.setCurrentIndex(self.CONFIRM)
         self.photo.setPixmap(self.cam.to_pixmap(image, self.photo.size()))
         r = recognizer.read_plate(image)
         self.plate, self.raw, self.conf = r["plate"], r["raw"], r["confidence"]
@@ -132,7 +152,6 @@ class MainWindow(QStackedWidget):
             self.conf_info.setText(f"High confidence ({self.conf:.0%})")
         else:
             self.conf_info.setText(f"LOW confidence ({self.conf:.0%}). Check carefully.")
-        self.setCurrentIndex(self.CONFIRM)
 
     def confirm_plate(self):
         typed = self.plate_edit.text().strip().upper().replace(" ", "")
@@ -145,7 +164,6 @@ class MainWindow(QStackedWidget):
 
     def process_tag(self):
         uid = self.uid_edit.text().strip().upper()
-        print("UID received:", repr(uid))
         if not uid:
             return
         self.visit_id = None
