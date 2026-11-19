@@ -260,6 +260,9 @@ class MainWindow(QStackedWidget):
 
     def run_power(self, flag):
         if config.DEV:
-            print("DEV mode: would run shutdown", flag, "now")
+            print("DEV mode: would run power", flag)
             return
-        subprocess.run(["sudo", "shutdown", flag, "now"])
+        cmd = "poweroff" if flag == "-h" else "reboot"
+        r = subprocess.run(["sudo", "-n", "systemctl", cmd], capture_output=True, text=True)
+        if r.returncode:
+            QMessageBox.warning(self, "Power failed", r.stderr or "unknown error")

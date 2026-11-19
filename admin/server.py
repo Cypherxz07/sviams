@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 from functools import wraps
 import os
+import re
 from markupsafe import escape as esc
 from flask import Flask, request, redirect, render_template_string, Response
 
@@ -39,26 +40,40 @@ th{background:#eee} nav a{margin-right:14px}
 @app.route("/")
 @auth
 def tags():
-    rows = "".join(
-        f"<tr><td>{esc(t['uid'])}</td><td>{esc(t['label'] or '')}</td><td>{esc(t['status'])}</td>"
-        f"<td><form method=post action='/tags/{esc(t['uid'])}/status' style='display:inline'>"
-        f"<select name=status><option>available</option><option>lost</option></select>"
-        f"<button>Set</button></form></td></tr>"
-        for t in db.list_tags())
+    rows = ""
+    for t in db.list_tags():
+        if t["status"] == "issued":
+            delete = "in use"
+        else:
+            delete = (f"<form method=post action='/tags/{esc(t['uid'])}/delete' style='display:inline' "
+                      f"onsubmit=\"return confirm('Delete this tag?')\"><button>Delete</button></form>")
+        rows += (f"<tr><td>{esc(t['uid'])}</td><td>{esc(t['label'] or '')}</td><td>{esc(t['status'])}</td>"
+                 f"<td><form method=post action='/tags/{esc(t['uid'])}/status' style='display:inline'>"
+                 f"<select name=status><option>available</option><option>lost</option></select>"
+                 f"<button>Set</button></form></td><td>{delete}</td></tr>")
     body = f"""
     <h2>Tags</h2>
     <form method=post action=/tags>
       UID <input name=uid required> Label <input name=label>
       <button>Add tag</button>
     </form><br>
-    <table><tr><th>UID</th><th>Label</th><th>Status</th><th>Change</th></tr>{rows}</table>
+    <table><tr><th>UID</th><th>Label</th><th>Status</th><th>Change</th><th>Delete</th></tr>{rows}</table>
     """
     return render_template_string(PAGE, body=body)
 
 @app.post("/tags")
 @auth
 def add_tag():
-    db.add_tag(request.form["uid"].strip().upper(), request.form.get("label", "").strip())
+    uid = request.form["uid"].strip().upper()
+    if not re.fullmatch(r"[0-9A-F]{8}", uid):
+        return redirect("/")
+    db.add_tag(uid, request.form.get("label", "").strip())
+    return redirect("/")
+
+@app.post("/tags/<uid>/delete")
+@auth
+def delete_tag(uid):
+    db.delete_tag(uid)
     return redirect("/")
 
 @app.post("/tags/<uid>/status")
@@ -84,15 +99,26 @@ def visits():
         if only and not v["override"]:
             continue
         flags = ("OVERRIDE " if v["override"] else "") + ("edited" if v["edited_by_guard"] else "")
+        if v["exit_time"]:
+            action = ""
+        else:
+            action = (f"<form method=post action='/visits/{v['id']}/close' style='display:inline' "
+                      f"onsubmit=\"return confirm('Force exit this visit?')\"><button>Force exit</button></form>")
         rows += (f"<tr><td>{esc(v['plate'])}</td><td>{esc(v['tag_uid'])}</td>"
                  f"<td>{v['entry_time']}</td><td>{v['exit_time'] or 'INSIDE'}</td>"
-                 f"<td>{flags}</td></tr>")
+                 f"<td>{flags}</td><td>{action}</td></tr>")
     body = f"""<h2>Visits</h2>
     <form>Plate/Tag <input name=q value="{esc(q)}"> Date <input type=date name=date value="{esc(day)}">
     <label><input type=checkbox name=override {'checked' if only else ''}> overrides only</label>
     <button>Search</button></form><br>
-    <table><tr><th>Plate</th><th>Tag</th><th>Entry</th><th>Exit</th><th>Flags</th></tr>{rows}</table>"""
+    <table><tr><th>Plate</th><th>Tag</th><th>Entry</th><th>Exit</th><th>Flags</th><th>Action</th></tr>{rows}</table>"""
     return render_template_string(PAGE, body=body)
+
+@app.post("/visits/<int:visit_id>/close")
+@auth
+def close_visit(visit_id):
+    db.force_exit(visit_id)
+    return redirect("/visits")
 
 @app.route("/events")
 @auth

@@ -60,11 +60,15 @@ def get_tag(uid):
 
 def set_tag_status(uid, status):
     with conn() as c:
-        c.execute("UPDATE tags SET status=? WHERE uid=?", (status, uid))
+        c.execute("UPDATE tags SET status=? WHERE uid=? AND status!='issued'", (status, uid))
 
 def list_tags():
     with conn() as c:
         return c.execute("SELECT * FROM tags ORDER BY label").fetchall()
+
+def delete_tag(uid):
+    with conn() as c:
+        c.execute("DELETE FROM tags WHERE uid=? AND status!='issued'", (uid,))
 
 # ---- entry ----
 def record_entry(plate, uid, plate_raw=None, confidence=None, edited=False):
@@ -109,9 +113,22 @@ def check_exit(plate, uid):
 def complete_exit(visit_id, override=False):
     with conn() as c:
         v = c.execute("SELECT * FROM visits WHERE id=?", (visit_id,)).fetchone()
-        c.execute("UPDATE visits SET exit_time=?, override=? WHERE id=?", (now(), int(override), visit_id))
-        c.execute("UPDATE tags SET status='available' WHERE uid=?", (v["tag_uid"],))
+        c.execute("UPDATE visits SET exit_time=?, override=? WHERE id=?",
+                  (now(), int(override), visit_id))
+        c.execute("UPDATE tags SET status='available' WHERE uid=? AND status='issued'",
+                  (v["tag_uid"],))
         log_event(c, "exit_override" if override else "exit_ok", v["plate"], v["tag_uid"])
+
+def force_exit(visit_id):
+    with conn() as c:
+        v = c.execute("SELECT * FROM visits WHERE id=? AND exit_time IS NULL",
+                      (visit_id,)).fetchone()
+        if v is None:
+            return
+        c.execute("UPDATE visits SET exit_time=?, override=1 WHERE id=?", (now(), visit_id))
+        c.execute("UPDATE tags SET status='available' WHERE uid=? AND status='issued'",
+                  (v["tag_uid"],))
+        log_event(c, "force_exit", v["plate"], v["tag_uid"])
 
 # ---- reading ----
 def list_visits(limit=200):
