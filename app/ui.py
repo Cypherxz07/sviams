@@ -1,6 +1,6 @@
 import subprocess
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import (QStackedWidget, QWidget, QVBoxLayout, QPushButton,
+from PyQt5.QtWidgets import (QStackedWidget, QWidget, QVBoxLayout, QGridLayout, QPushButton,
                              QLabel, QLineEdit, QMessageBox, QSizePolicy)
 import db, recognizer, config, rfid
 
@@ -22,6 +22,27 @@ def button(text, colour, size=34):
     b.setStyleSheet(f"background:{colour};font-size:{size}px")
     b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     return b
+
+class Keypad(QWidget):
+    def __init__(self, target):
+        super().__init__()
+        self.target = target
+        grid = QGridLayout(self)
+        grid.setSpacing(4)
+        grid.setContentsMargins(0, 0, 0, 0)
+        for r, keys in enumerate(["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]):
+            for c, k in enumerate(keys):
+                grid.addWidget(self._key(k, lambda _, k=k: self.target.insert(k)), r, c)
+        grid.addWidget(self._key("DEL", lambda _: self.target.backspace(), "#c0392b", 20), 3, 7, 1, 2)
+        grid.addWidget(self._key("CLR", lambda _: self.target.clear(), "#c77700", 20), 3, 9)
+
+    def _key(self, text, fn, colour="#444", size=26):
+        b = QPushButton(text)
+        b.setStyleSheet(f"background:{colour};font-size:{size}px;padding:4px;border-radius:8px")
+        b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        b.setFocusPolicy(Qt.NoFocus)
+        b.clicked.connect(fn)
+        return b
 
 class MainWindow(QStackedWidget):
     HOME, CAMERA, CONFIRM, TAG, RESULT, REGISTER = range(6)
@@ -86,6 +107,10 @@ class MainWindow(QStackedWidget):
         self.conf_info = label("", 26)
         self.plate_edit = QLineEdit()
         self.plate_edit.setAlignment(Qt.AlignCenter)
+        self.keypad = Keypad(self.plate_edit)
+        self.keypad.hide()
+        edit = button("Edit plate", "#555", 28)
+        edit.clicked.connect(self.toggle_keypad)
         ok = button("Confirm", "#1a9e4b")
         ok.clicked.connect(self.confirm_plate)
         retake = button("Retake", "#777", 28)
@@ -93,6 +118,8 @@ class MainWindow(QStackedWidget):
         lay.addWidget(self.photo, 6)
         lay.addWidget(self.plate_edit, 1)
         lay.addWidget(self.conf_info, 1)
+        lay.addWidget(self.keypad, 6)
+        lay.addWidget(edit, 1)
         lay.addWidget(ok, 2)
         lay.addWidget(retake, 1)
         return w
@@ -110,6 +137,9 @@ class MainWindow(QStackedWidget):
         lay.addWidget(self.uid_edit, 1)
         lay.addWidget(go, 2)
         lay.addWidget(cancel, 1)
+        if not config.DEV:
+            self.uid_edit.hide()
+            go.hide()
         self.tag_timer = QTimer(self)
         self.tag_timer.timeout.connect(self.poll_tag)
         return w
@@ -163,6 +193,8 @@ class MainWindow(QStackedWidget):
         self.cam.capture(self.on_captured)
 
     def on_captured(self, image):
+        self.keypad.hide()
+        self.photo.show()
         self.setCurrentIndex(self.CONFIRM)
         self.photo.setPixmap(self.cam.to_pixmap(image, self.photo.size()))
         r = recognizer.read_plate(image)
@@ -182,6 +214,11 @@ class MainWindow(QStackedWidget):
         self.uid_edit.clear()
         self.setCurrentIndex(self.TAG)
         self.tag_timer.start(200)
+
+    def toggle_keypad(self):
+        show = not self.keypad.isVisible()
+        self.keypad.setVisible(show)
+        self.photo.setVisible(not show)
 
     def poll_tag(self):
         uid = rfid.read_uid()
