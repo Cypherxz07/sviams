@@ -4,3 +4,4 @@ __pycache__/
 *.bak
 data/
 .env
+test.jpg
