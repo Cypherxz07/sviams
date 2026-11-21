@@ -33,7 +33,7 @@ table{border-collapse:collapse;width:100%;margin-bottom:24px}
 td,th{border:1px solid #ccc;padding:6px;text-align:left}
 th{background:#eee} nav a{margin-right:14px}
 </style>
-<nav><a href="/">Tags</a><a href="/visits">Visits</a><a href="/events">Events</a></nav>
+<nav><a href="/">Tags</a><a href="/visits">Visits</a><a href="/events">Events</a><a href="/export">Export</a></nav>
 {{ body|safe }}
 """
 
@@ -128,6 +128,32 @@ def events():
         for e in db.list_events())
     body = f"<h2>Events</h2><table><tr><th>Time</th><th>Type</th><th>Plate</th><th>Tag</th></tr>{rows}</table>"
     return render_template_string(PAGE, body=body)
+
+import csv, io
+
+@app.route("/export")
+@auth
+def export_page():
+    body = """<h2>Export visits</h2>
+    <form action="/export.csv">From <input type=date name=start required>
+    To <input type=date name=end required> <button>Download CSV</button></form>"""
+    return render_template_string(PAGE, body=body)
+
+@app.route("/export.csv")
+@auth
+def export_csv():
+    start = request.args.get("start", "")
+    end = request.args.get("end", "")
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["plate", "tag", "entry_time", "exit_time", "override", "edited_by_guard", "confidence"])
+    for v in db.list_visits(100000):
+        day = v["entry_time"][:10]
+        if start <= day <= end:
+            w.writerow([v["plate"], v["tag_uid"], v["entry_time"], v["exit_time"] or "",
+                        v["override"], v["edited_by_guard"], v["confidence"]])
+    return Response(out.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=visits_{start}_to_{end}.csv"})
 
 if __name__ == "__main__":
     db.purge_old()
