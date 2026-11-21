@@ -5,6 +5,16 @@ from pathlib import Path
 DB_PATH = Path.home() / "sviams" / "data" / "sviams.db"
 RETENTION_DAYS = 7
 
+FUZZY = 1  # max character differences accepted at exit
+
+def _lev(a, b):
+    d = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        prev, d[0] = d[0], i
+        for j, cb in enumerate(b, 1):
+            prev, d[j] = d[j], min(d[j] + 1, d[j - 1] + 1, prev + (ca != cb))
+    return d[-1]
+
 def now():
     return datetime.now().isoformat(timespec="seconds")
 
@@ -105,7 +115,7 @@ def check_exit(plate, uid):
         if v is None:
             log_event(c, "no_open_visit", plate, uid)
             return "no_open_visit", None
-        if v["plate"] == plate:
+        if v["plate"] == plate or _lev(v["plate"], plate) <= FUZZY:
             return "match", v["id"]
         log_event(c, "exit_mismatch", plate, uid)
         return "mismatch", v["id"]
